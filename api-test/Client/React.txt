@@ -1,0 +1,419 @@
+UI am using raect.js
+
+// src/App.js
+
+import React, { useState } from 'react';
+import Login from './components/Login';
+import CategoryForm from './components/CategoryForm';
+import CategoryList from './components/CategoryList';
+import ServiceForm from './components/ServiceForm';
+import ServiceList from './components/ServiceList';
+import axios from 'axios';
+
+function App() {
+  const [token, setToken] = useState(null);
+
+  React.useEffect(() => {
+    const storedToken = localStorage.getItem('token');
+    if (storedToken) {
+      setToken(storedToken);
+    }
+  }, []);
+
+  axios.interceptors.request.use(
+    (config) => {
+      if (token) {
+        config.headers.Authorization = `${token}`;
+      }
+      return config;
+    },
+    (error) => {
+      return Promise.reject(error);
+    }
+  );
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setToken(null);
+  };
+
+  return (
+    <div className="App">
+      <h1>Service Management</h1>
+      {token ? (
+        <>
+          <button onClick={handleLogout}>Logout</button>
+          <CategoryForm />
+          <CategoryList />
+           {/* <ServiceForm /> */}
+          
+        </>
+      ) : (
+        <Login setToken={setToken} />
+      )}
+    </div>
+  );
+}
+
+export default App;
+
+// src/components/CategoryForm.js
+
+import React, { useState } from 'react';
+import axios from 'axios';
+
+const CategoryForm = () => {
+  const [categoryName, setCategoryName] = useState('');
+
+  const handleSubmit = async (e) => {
+    console.log(categoryName)
+    e.preventDefault();
+    try {
+     let res= await axios.post('http://localhost:9000/api/categories', { name: categoryName });
+    
+      setCategoryName('');
+    } catch (error) {
+      console.error('Error creating category:', error);
+    }
+  };
+
+  return (
+    <div>   
+      <h1>Add Category</h1>
+      <form onSubmit={handleSubmit}>
+      <input
+        type="text"
+        placeholder="Category Name"
+        value={categoryName}
+        onChange={(e) => setCategoryName(e.target.value)}
+        required
+      />
+      <button type="submit">Add Category</button>
+    </form>
+    </div>
+
+  );
+};
+
+
+// CategoryList.js
+
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import Service from './Service'; // Import the Service component
+
+const CategoryList = () => {
+  const [categories, setCategories] = useState([]);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newServiceName, setNewServiceName] = useState('');
+  const [newServiceType, setNewServiceType] = useState('Normal'); // Default type or as per your requirement
+  const [newServiceDuration, setNewServiceDuration] = useState('');
+  const [newServicePrice, setNewServicePrice] = useState('');
+  const [newServiceOptionType, setNewServiceOptionType] = useState('Monthly');
+  const [addingServiceOption, setAddingServiceOption] = useState(false);
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  const fetchCategories = async () => {
+    try {
+      const categoriesResponse = await axios.get('http://localhost:9000/api/categories');
+      const categoriesData = categoriesResponse.data;
+
+      // Fetch services and their price options for each category
+      const categoriesWithServices = await Promise.all(
+        categoriesData.map(async (category) => {
+          const servicesResponse = await axios.get(`http://localhost:9000/api/service/${category.id}`);
+          const servicesData = servicesResponse.data;
+
+          // Fetch service price options for each service
+          const servicesWithPriceOptions = await Promise.all(
+            servicesData.map(async (service) => {
+              const priceOptionsResponse = await axios.get(`http://localhost:9000/api/service/serviceOption/${category.id}`);
+              const priceOptionsData = priceOptionsResponse.data;
+              return { ...service, priceOptions: priceOptionsData };
+            })
+          );
+
+          return { ...category, services: servicesWithPriceOptions };
+        })
+      );
+
+      setCategories(categoriesWithServices);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId) => {
+    try {
+      await axios.delete(`http://localhost:9000/api/categories/${categoryId}`);
+      fetchCategories();
+    } catch (error) {
+      console.error('Error deleting category:', error);
+    }
+  };
+
+  const handleAddServiceAndOption = async (categoryId) => {
+    try {
+      // Add Service
+      const serviceResponse = await axios.post(`http://localhost:9000/api/service`, {
+        category_id: categoryId,
+        name: newServiceName,
+        type: newServiceType
+      });
+      const newServiceId = serviceResponse.data.id;
+
+      // Add Service Option
+      await axios.post(`http://localhost:9000/api/service/serviceOption/${newServiceId}`, {
+        duration: newServiceDuration,
+        price: newServicePrice,
+        type: newServiceOptionType
+      });
+
+      fetchCategories();
+      setNewServiceName('');
+      setNewServiceType('Normal');
+      setNewServiceDuration('');
+      setNewServicePrice('');
+      setNewServiceOptionType('Monthly');
+      setAddingServiceOption(false); // Close the form after adding service and option
+    } catch (error) {
+      console.error('Error adding service and option:', error);
+    }
+  };
+
+  const updateCategoriesAfterServiceAction = () => {
+    fetchCategories();
+  };
+
+  return (
+    <div>
+      <h2>Categories</h2>
+      {categories.map((category) => (
+        <div key={category.id}>
+          <h3>{category.name}</h3>
+          {category.services.length > 0 ? (
+            <ul>
+              {category.services.map((service) => (
+                <div key={service.id}>
+                  <Service
+                    category={category}
+                    service={service}
+                    onUpdate={updateCategoriesAfterServiceAction}
+                    onDelete={updateCategoriesAfterServiceAction}
+                  />
+                  {service.priceOptions.length > 0 && (
+                    <ul>
+                      {service.priceOptions.map((option) => (
+                        <li key={option.id}>
+                          Duration: {option.duration}, Price: {option.price}, Type: {option.type}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </ul>
+          ) : (
+            <div>
+              <p>No services found.</p>
+            </div>
+          )}
+          <div>
+            {!addingServiceOption && (
+              <button onClick={() => setAddingServiceOption(true)}>Add Service and Option</button>
+            )}
+            {addingServiceOption && (
+              <div>
+                <input
+                  type="text"
+                  placeholder="Service Name"
+                  value={newServiceName}
+                  onChange={(e) => setNewServiceName(e.target.value)}
+                />
+                <select
+                  value={newServiceType}
+                  onChange={(e) => setNewServiceType(e.target.value)}
+                >
+                  <option value="Normal">Normal</option>
+                  {/* Add other type options as needed */}
+                </select>
+                <input
+                  type="text"
+                  placeholder="Duration"
+                  value={newServiceDuration}
+                  onChange={(e) => setNewServiceDuration(e.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Price"
+                  value={newServicePrice}
+                  onChange={(e) => setNewServicePrice(e.target.value)}
+                />
+                <select
+                  value={newServiceOptionType}
+                  onChange={(e) => setNewServiceOptionType(e.target.value)}
+                >
+                  <option value="Monthly">Monthly</option>
+                  {/* Add other type options as needed */}
+                </select>
+                <button onClick={() => handleAddServiceAndOption(category.id)}>Add Service and Option</button>
+                <button onClick={() => setAddingServiceOption(false)}>Cancel</button>
+              </div>
+            )}
+          </div>
+          <button onClick={() => handleDeleteCategory(category.id)}>Delete Category</button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// src/components/Login.js
+
+import React, { useState } from 'react';
+import axios from 'axios';
+
+const Login = ({setToken}) => {
+  const [name, setName] = useState('');
+
+
+  const handleSubmit = async (e) => {
+    console.log("name",name)
+    e.preventDefault();
+    try {
+      const response = await axios.post('http://localhost:9000/api/user', name );
+      console.log(response)
+      const token = response.data.token;
+      localStorage.setItem('token', token); // Store token in local storage
+      setToken(token); // Pass token to parent component
+      setName('');
+      
+    } catch (error) {
+      console.error('Login error:', error);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="text"
+        placeholder="Email"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        required
+      />
+      
+      <button type="submit">Login</button>
+    </form>
+  );
+};
+
+export default Login;
+
+// Service.js
+
+import React from 'react';
+import axios from 'axios';
+
+const Service = ({ category, service, onUpdate, onDelete }) => {
+  const handleUpdateService = async (updatedServiceData) => {
+    try {
+      await axios.put(`http://localhost:9000/api/categories/${category.id}/services/${service.id}`, updatedServiceData);
+      onUpdate();
+    } catch (error) {
+      console.error('Error updating service:', error);
+    }
+  };
+
+  const handleFormSubmit = async (e, updatedServiceData) => {
+    e.preventDefault();
+    try {
+      await axios.put(`http://localhost:9000/api/categories/${category.id}/services/${service.id}`, updatedServiceData);
+      onUpdate();
+    } catch (error) {
+      console.error('Error updating service:', error);
+    }
+  };
+
+  const handleDeleteService = async () => {
+    console.log("deleteId",category.id)
+    try {
+      await axios.delete(`http://localhost:9000/api/service/${category.id}`);;
+    } catch (error) {
+      console.error('Error deleting service:', error);
+    }
+  };
+
+  return (
+    <li key={service.id}>
+      <div>
+        <strong>Service Name:</strong> {service.name}
+      </div>
+      <div>
+        <strong>Type:</strong> {service.type}
+      </div>
+      <form onSubmit={(e) => handleFormSubmit(e, { ...service, name: 'Updated Service Name' })}>
+        <input
+          type="text"
+          value={service.name}
+          onChange={(e) => handleUpdateService({ ...service, name: e.target.value })}
+        />
+        <button type="submit">Update</button>
+      </form>
+      <button onClick={handleDeleteService}>Delete Service</button>
+    </li>
+  );
+};
+
+export default Service;
+
+import React, { useState } from 'react';
+import axios from 'axios';
+
+const ServiceForm = ({ categoryId, fetchServices }) => {
+  const [serviceName, setServiceName] = useState('');
+  const [type, setType] = useState('Normal');
+  const [serviceId, setServiceId] = useState(null); // State to hold the created service's id
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await axios.post(`http://localhost:3000/service`, { serviceName, type });
+      const createdService = response.data; // Assuming the backend returns the created service object
+      setServiceId(createdService.id); // Assuming 'id' is the key for serviceId in the response
+      fetchServices();
+      setServiceName('');
+      setType('Normal');
+    } catch (error) {
+      console.error('Error creating service:', error);
+    }
+  };
+
+  return (
+    <>
+      <h1>ADD Service</h1>
+      <form onSubmit={handleSubmit}>
+        <input
+          type="text"
+          placeholder="Service Name"
+          value={serviceName}
+          onChange={(e) => setServiceName(e.target.value)}
+          required
+        />
+        <select value={type} onChange={(e) => setType(e.target.value)}>
+          <option value="Normal">Normal</option>
+          <option value="VIP">VIP</option>
+        </select>
+        <button type="submit">Add Service</button>
+      </form>
+      {serviceId && <p>Created Service ID: {serviceId}</p>}
+    </>
+  );
+};
+
+export default ServiceForm;
+
+
